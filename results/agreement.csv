@@ -1,0 +1,4 @@
+source_a,source_b,n_compared,agree,agreement,essential_in_a_only,essential_in_b_only
+keio,tradis,3510,3402,0.9692307692307692,18,90
+keio,pec,4165,4049,0.9721488595438176,77,39
+tradis,pec,3498,3373,0.9642652944539737,112,13

@@ -1,0 +1,10 @@
+# The SBML models are ~50MB and redistributable from BiGG; scripts/01_fetch.py --download gets them.
+data/external/models/
+# The RB-TnSeq fitness tables the corrections were derived from (Fitness Browser), kept local.
+data/external/fitness/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ipynb_checkpoints/
+*.egg-info/
+.venv/

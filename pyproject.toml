@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eeb"
+version = "0.1.0"
+description = "Grading E. coli metabolic models against several independent essentiality experiments"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "cobra>=0.29",
+    "pandas>=2.0",
+    "numpy>=1.24",
+    "matplotlib>=3.7",
+    "openpyxl>=3.1",
+    "xlrd>=2.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4", "ruff>=0.5"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 110
