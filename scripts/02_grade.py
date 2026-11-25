@@ -10,6 +10,8 @@
   results/changed.csv       the genes whose call the corrections changed, and which way
   results/bootstrap.csv     whether the change in MCC survives resampling the genes
   results/corrections_diff.csv  what the corrections actually change in the model
+  results/common_genes.csv  every model graded on the genes all four of them contain
+  results/strict_uptakes.csv  the same, with every model on strictly identical uptakes
 
 Usage:  PYTHONPATH=src python scripts/02_grade.py
 """
@@ -34,18 +36,41 @@ MEDIA = {"minimal": False, "rich": True}
 BEFORE, AFTER = "iML1515", "iML1515_corrected"
 
 
-def predictions(names=tuple(MODEL_FILES)) -> dict:
+def predictions(names=tuple(MODEL_FILES), strict: bool = False) -> dict:
     """Deletion scans for every model under both media. The slow part, and still only a minute or two."""
     out = {}
     for name in names:
         model = load_model(name)
         for medium, rich in MEDIA.items():
             with model:
-                set_medium(model, rich)
+                set_medium(model, rich, strict=strict)
                 out[(name, medium)] = predict_essential(model)
             print(f"  {name} / {medium}: {int(out[(name, medium)]['predicted_essential'].sum())} "
                   "predicted essential", flush=True)
     return out
+
+
+def grade_all(preds: dict, table, votes, genes=None) -> tuple:
+    """Score every model x medium x experiment, optionally restricted to a fixed set of genes.
+
+    `genes` exists because the models do not contain the same genes: iJR904 has 904, iML1515 has 1515.
+    Scoring each model over its own gene list means a comparison between two models also changes which
+    genes are being graded, so an apparent improvement could be a change of subject. Passing the genes
+    common to every model holds that fixed.
+    """
+    rows, split_rows = [], []
+    for (name, medium), pred in preds.items():
+        call = pred["predicted_essential"]
+        if genes is not None:
+            call = call.reindex(genes).dropna().astype(bool)
+        for src in SOURCES:
+            rows.append({"model": name, "medium": medium, "experiment": src,
+                         **score(call, table[src])})
+            for subset, mask in (("agreed", votes["unanimous"]), ("contested", votes["contested"])):
+                keep = table.index[mask.reindex(table.index).fillna(False)]
+                split_rows.append({"model": name, "medium": medium, "experiment": src,
+                                   "genes": subset, **score(call, table.loc[keep, src])})
+    return pd.DataFrame(rows), pd.DataFrame(split_rows)
 
 
 def main():
@@ -63,24 +88,43 @@ def main():
 
     # ---------------------------------------------------------------- grade every model
     preds = predictions()
-    rows, split_rows = [], []
-    for (name, medium), pred in preds.items():
-        for src in SOURCES:
-            rows.append({"model": name, "medium": medium, "experiment": src,
-                         **score(pred["predicted_essential"], table[src])})
-            # the same grade, restricted to the genes the experiments agree about and those they do not
-            for subset, mask in (("agreed", votes["unanimous"]), ("contested", votes["contested"])):
-                keep = table.index[mask.reindex(table.index).fillna(False)]
-                split_rows.append({"model": name, "medium": medium, "experiment": src,
-                                   "genes": subset,
-                                   **score(pred["predicted_essential"], table.loc[keep, src])})
-    grades = pd.DataFrame(rows)
+    grades, split = grade_all(preds, table, votes)
     grades.to_csv(RESULTS / "grades.csv", index=False)
-    split = pd.DataFrame(split_rows)
     split.to_csv(RESULTS / "split.csv", index=False)
 
     print(grades[grades["model"] == BEFORE]
           .pivot(index="medium", columns="experiment", values="mcc").round(3).to_string(), "\n")
+
+    # ------------------------------------------------- comparing models without also changing the genes
+    # The four generations do not contain the same genes, so a straight comparison between them is
+    # partly a comparison of gene lists. Grading them all on the genes they share separates the two.
+    generations = [n for n in MODEL_FILES if n != AFTER]
+    common = set.intersection(*(set(preds[(n, "rich")].index) for n in generations))
+    common = sorted(common)
+    common_grades, _ = grade_all({k: v for k, v in preds.items() if k[0] in generations},
+                                 table, votes, genes=common)
+    common_grades["genes"] = "common"
+    common_grades.to_csv(RESULTS / "common_genes.csv", index=False)
+    sizes = ", ".join("{}: {}".format(n, len(preds[(n, "rich")])) for n in generations)
+    print(f"the four generations share {len(common)} genes ({sizes} in total). "
+          "Graded on those shared genes only:")
+    print(common_grades.pivot_table(index="medium", columns="model", values="mcc")
+          .reindex(columns=generations).round(3).to_string())
+    own = grades[grades["model"].isin(generations)].pivot_table(index="medium", columns="model",
+                                                                values="mcc")
+    print("\nand for comparison, each graded on its own genes:")
+    print(own.reindex(columns=generations).round(3).to_string(), "\n")
+
+    # ------------------------------------------------- how much of that is the medium each model ships
+    # set_medium keeps uptakes a model's author left open. That is right for grading a published model
+    # and wrong for attributing a difference between two of them, so the strict run drops them.
+    strict_preds = predictions(names=tuple(generations), strict=True)
+    strict_grades, _ = grade_all(strict_preds, table, votes, genes=common)
+    strict_grades["genes"] = "common"
+    strict_grades.to_csv(RESULTS / "strict_uptakes.csv", index=False)
+    print("same shared genes, but every model on exactly the same uptakes and nothing else:")
+    print(strict_grades.pivot_table(index="medium", columns="model", values="mcc")
+          .reindex(columns=generations).round(3).to_string(), "\n")
 
     # ---------------------------------------------------------------- the grade depends on the grader
     print("same model, same medium, graded on genes the experiments agree about vs contest:")
@@ -123,12 +167,15 @@ def main():
     # what the corrections actually are, so the transfer result can be read next to its cause
     diff = corrections_diff(load_model(BEFORE), load_model(AFTER))
     diff["gene_rules_changed"].to_csv(RESULTS / "corrections_diff.csv", index=False)
+    n_changed = len(diff["gene_rules_changed"])
     print(f"the corrections consist of: {len(diff['reactions_added'])} added reactions "
           f"{diff['reactions_added']}, {len(diff['reactions_removed'])} removed, "
-          f"{len(diff['gene_rules_changed'])} gene rules whose gene set changed "
-          f"({diff['gene_rules_rebracketed']} more only re-bracketed), "
+          f"{n_changed + diff['gene_rules_equivalent']} gene rules rewritten of which "
+          f"{diff['gene_rules_equivalent']} are logically equivalent and {n_changed} are not, "
           f"{diff['bounds_changed']} changed bounds")
-    print(diff["gene_rules_changed"].to_string(index=False), "\n")
+    print(diff["gene_rules_changed"][
+        ["reaction", "change", "dropped", "newly_essential", "no_longer_essential"]
+    ].to_string(index=False), "\n")
 
     # which genes changed, and whether the change is bigger than noise
     chg = changed_calls(preds[(BEFORE, "rich")]["predicted_essential"],

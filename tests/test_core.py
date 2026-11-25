@@ -20,6 +20,7 @@ import pandas as pd
 import pytest
 
 from eeb.essentiality import agreement, consensus, load
+from eeb.gpr import equivalent, essential_genes, minimal_gene_sets
 from eeb.model import M9_GLUCOSE, RICH_SUPPLEMENTS, predict_essential, score, set_medium
 from eeb.transfer import bootstrap_delta, changed_calls, corrections_diff, direction, reconcile
 
@@ -103,6 +104,37 @@ def test_reconcile_shows_the_trade_behind_a_falling_error_count():
     assert r["delta_mcc"] < 0       # and the model is still worse
 
 
+# ----------------------------------------------------------------------- gene rules mean what they say
+@pytest.mark.parametrize(("a", "b", "same"), [
+    ("x and y", "x or y", False),                              # the distinction that matters most
+    ("(x and y) and z", "x and y and z", True),                # bracketing
+    ("x or y", "y or x", True),                                # ordering
+    ("(x or y) and z", "(x and z) or (y and z)", True),        # distribution
+    ("(x and y) or x", "x", True),                             # absorption
+    ("x or y", "x", False),                                    # an isozyme dropped
+    ("", "", True),
+])
+def test_rules_compare_by_meaning_not_by_text(a, b, same):
+    assert equivalent(a, b) is same
+
+
+@pytest.mark.parametrize(("rule", "expected"), [
+    ("x and y", {"x", "y"}),           # a complex: either knockout stops the reaction
+    ("x or y", set()),                 # isozymes: neither is needed on its own
+    ("(x or y) and z", {"z"}),         # z is in every route, x and y are not
+    ("x", {"x"}),
+    ("", set()),                       # no gene enables it, so no gene is essential to it
+])
+def test_essential_genes_are_those_in_every_route(rule, expected):
+    assert set(essential_genes(rule)) == expected
+
+
+def test_malformed_rules_raise_rather_than_parse_to_something_wrong():
+    for bad in ("x and", "(x or y", "x y", "and x"):
+        with pytest.raises(ValueError):
+            minimal_gene_sets(bad)
+
+
 # ----------------------------------------------------------------------------------- behaviour
 def test_set_medium_closes_everything_it_did_not_open(textbook):
     with textbook as model:
@@ -163,9 +195,9 @@ def test_changed_calls_reports_direction_against_the_majority():
     assert d.loc["keio", "now_right"] == 1 and d.loc["keio", "now_wrong"] == 1
 
 
-def test_corrections_diff_ignores_rebracketing_but_not_real_changes():
-    """Most of the edits in the published corrected model only re-bracket an unchanged rule. Counting
-    those as changes would treble the apparent size of the correction.
+def test_corrections_diff_ignores_rewriting_but_not_real_changes():
+    """Most of the edits in the published corrected model rewrite a rule without changing what it means.
+    Counting those as changes would quadruple the apparent size of the correction.
 
     Built from stubs rather than cobra models because cobra normalises rule text on assignment, which
     would quietly erase the very distinction under test.
@@ -178,19 +210,40 @@ def test_corrections_diff_ignores_rebracketing_but_not_real_changes():
         def __init__(self, reactions):
             self.reactions = reactions
 
-    before = M([R("KEPT", "b0001 and b0002"), R("REBRACKET", "(b0003 and b0004) or b0005"),
+    before = M([R("KEPT", "b0001 and b0002"), R("REWRITTEN", "(b0003 and b0004) or b0005"),
                 R("TIGHTENED", "b0006 or b0007"), R("REBOUNDED", "b0008", (0.0, 1000.0))])
-    after = M([R("KEPT", "b0001 and b0002"), R("REBRACKET", "b0003 and b0004 or b0005"),
+    after = M([R("KEPT", "b0001 and b0002"), R("REWRITTEN", "b0005 or (b0004 and b0003)"),
                R("TIGHTENED", "b0006"), R("REBOUNDED", "b0008", (-7.0, 1000.0)),
                R("EX_added_c", "", (-1000.0, 1000.0))])
 
     d = corrections_diff(before, after)
     assert d["reactions_added"] == ["EX_added_c"] and d["reactions_removed"] == []
-    assert d["gene_rules_rebracketed"] == 1
+    assert d["gene_rules_equivalent"] == 1
     assert list(d["gene_rules_changed"]["reaction"]) == ["TIGHTENED"]
-    assert d["gene_rules_changed"].iloc[0]["dropped"] == "b0007"
-    assert d["gene_rules_changed"].iloc[0]["added"] == ""
+    row = d["gene_rules_changed"].iloc[0]
+    assert row["dropped"] == "b0007" and row["added"] == ""
+    assert row["change"] == "more essential" and row["newly_essential"] == "b0006"
     assert d["bounds_changed"] == 1
+
+
+def test_corrections_diff_catches_a_complex_becoming_isozymes():
+    """The case a gene-set comparison cannot see. `A and B` and `A or B` contain the same genes and mean
+    opposite things: both essential, against neither essential. If this ever passes as 'equivalent', the
+    diff is measuring the wrong thing and every claim resting on it is unsupported."""
+    class R:
+        def __init__(self, rid, rule):
+            self.id, self.gene_reaction_rule, self.bounds = rid, rule, (0.0, 1000.0)
+
+    class M:
+        def __init__(self, reactions):
+            self.reactions = reactions
+
+    d = corrections_diff(M([R("RXN", "b0001 and b0002")]), M([R("RXN", "b0001 or b0002")]))
+    assert d["gene_rules_equivalent"] == 0
+    row = d["gene_rules_changed"].iloc[0]
+    assert row["change"] == "less essential"
+    assert row["dropped"] == "" and row["added"] == ""          # the gene set is identical
+    assert set(row["no_longer_essential"].split()) == {"b0001", "b0002"}
 
 
 @needs_models
@@ -203,10 +256,13 @@ def test_the_published_corrections_are_what_the_readme_says_they_are():
     assert d["reactions_removed"] == []
     rules = d["gene_rules_changed"].set_index("reaction")
     assert len(rules) == 9
-    # every substantive rule change drops an isozyme and adds nothing
+    assert d["gene_rules_equivalent"] == 28       # established by Boolean equivalence, not gene sets
+    # every substantive change drops an isozyme, adds no gene, and makes exactly one gene essential
     assert (rules["added"] == "").all()
-    assert rules.loc["METS", "rule_after"] == "b3829"     # metE left alone when metH is dropped
-    assert rules.loc["SHKK", "rule_after"] == "b3390"     # aroK left alone when aroL is dropped
+    assert (rules["change"] == "more essential").all()
+    assert (rules["newly_essential"].str.split().str.len() == 1).all()
+    assert rules.loc["METS", "newly_essential"] == "b3829"    # metE, once metH is dropped
+    assert rules.loc["SHKK", "newly_essential"] == "b3390"    # aroK, once aroL is dropped
 
 
 def test_bootstrap_delta_is_zero_when_nothing_changed():
@@ -246,6 +302,30 @@ def test_the_error_count_and_the_mcc_disagree_under_minimal_medium():
     assert rec.loc[("minimal", "keio"), "delta_errors"] < 0
     assert rec.loc[("minimal", "keio"), "delta_mcc"] < 0
     assert (rec["tp_lost"] > 0).all()
+
+
+@needs_results
+def test_comparing_models_on_shared_genes_changes_the_picture():
+    """The models contain different genes, so grading each on its own list makes a model comparison
+    partly a comparison of gene lists. On the shared genes the development gain is one step."""
+    c = pd.read_csv(RESULTS / "common_genes.csv")
+    rich = c[c["medium"] == "rich"].pivot_table(index="experiment", columns="model", values="mcc")
+    early = rich["iAF1260"] - rich["iJR904"]       # 2003 -> 2007
+    late = rich["iML1515"] - rich["iAF1260"]       # 2007 -> 2017
+    assert (early > 0.09).all()
+    assert (late.abs() < 0.03).all()
+    assert (early > late).all()
+
+
+@needs_results
+def test_the_four_generations_ship_no_extra_uptakes_of_their_own():
+    """set_medium keeps uptakes a model's author left open, which is right for grading a published model
+    but would confound a comparison between models. For these four it makes no difference — only the
+    corrected model ships extras — and that is worth pinning rather than assuming."""
+    lenient = pd.read_csv(RESULTS / "common_genes.csv").set_index(["model", "medium", "experiment"])
+    strict = pd.read_csv(RESULTS / "strict_uptakes.csv").set_index(["model", "medium", "experiment"])
+    joined = lenient[["mcc"]].join(strict[["mcc"]], rsuffix="_strict")
+    assert (joined["mcc"] - joined["mcc_strict"]).abs().max() < 1e-9
 
 
 @needs_results

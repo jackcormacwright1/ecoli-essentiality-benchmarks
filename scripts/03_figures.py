@@ -92,24 +92,54 @@ def figure_disagreement(consensus, agreement):
     save(fig, "disagreement.png")
 
 
-def figure_medium(grades):
-    """The medium moves the grade more than fifteen years of model development does."""
-    fig, axes = plt.subplots(1, 2, figsize=(11.0, 4.0), sharey=True,
-                             gridspec_kw={"wspace": 0.08})
-    for ax, medium, title in zip(axes, ("minimal", "rich"),
-                                 ("M9 glucose (the model's default)", "Rich medium (the experiment's)")):
-        g = grades[(grades["medium"] == medium) & (grades["model"].isin(MODELS))]
+def figure_medium(grades, common):
+    """What a model-generation comparison is really measuring, once the gene set is held fixed.
+
+    The four reconstructions do not contain the same genes, so grading each on its own gene list makes a
+    comparison between generations partly a comparison of gene lists. The middle panel repeats it on the
+    genes all four share; the right panel prices the medium against what development actually bought.
+    """
+    fig, axes = plt.subplots(1, 3, figsize=(13.5, 4.2),
+                             gridspec_kw={"width_ratios": [1, 1, 1.15], "wspace": 0.3})
+
+    for ax, df, title in (
+        (axes[0], grades, "Each model on its own genes"),
+        (axes[1], common, "All four on the genes they share"),
+    ):
+        g = df[(df["medium"] == "rich") & (df["model"].isin(MODELS))]
         for src in ORDER:
             s = g[g["experiment"] == src].set_index("model").reindex(MODELS)
             ax.plot(range(len(MODELS)), s["mcc"], color=COLOUR[src], marker="o", ms=6, label=NAME[src])
-        ax.set(xticks=range(len(MODELS)), title=title, ylim=(0, 0.85))
-        ax.set_xticklabels(MODELS, fontsize=8.5)
-    axes[0].set_ylabel("Matthews correlation")
-    # Two of the three lines sit within 0.01 of each other at the right edge, so end-of-line names would
-    # overprint. The legend carries identity instead.
+        ax.set(xticks=range(len(MODELS)), title=title, ylim=(0.3, 0.85))
+        ax.set_xticklabels(MODELS, fontsize=8, rotation=20, ha="right")
+    axes[0].set_ylabel("Matthews correlation (rich medium)")
     axes[0].legend(fontsize=8.5, loc="lower right")
-    fig.suptitle("Getting the medium right is worth about as much as fifteen years of model development",
-                 x=0.01, ha="left", y=1.03)
+    axes[1].annotate("almost all of the gain\nis one step, in 2007", (1.6, 0.40), fontsize=8.5,
+                     color=MUTED, ha="center", va="center")
+
+    # What each thing is worth, on the shared genes, so the comparison is like for like
+    rich = common[common["medium"] == "rich"].pivot(index="experiment", columns="model", values="mcc")
+    minimal = common[common["medium"] == "minimal"].pivot(index="experiment", columns="model",
+                                                          values="mcc")
+    effects = {
+        "getting the\nmedium right": (rich["iML1515"] - minimal["iML1515"]).reindex(ORDER),
+        "all development\n2003 to 2017": (rich["iML1515"] - rich["iJR904"]).reindex(ORDER),
+        "development\nsince 2007": (rich["iML1515"] - rich["iAF1260"]).reindex(ORDER),
+    }
+    x = np.arange(len(effects))
+    for offset, src in zip((-0.26, 0.0, 0.26), ORDER):
+        values = [effects[k][src] for k in effects]
+        axes[2].bar(x + offset, values, width=0.24, color=COLOUR[src], label=NAME[src])
+        for xi, v in zip(x + offset, values):
+            axes[2].text(xi, v + 0.007, f"{v:+.2f}", ha="center", fontsize=7.5, color=MUTED)
+    axes[2].axhline(0, color=INK, lw=1.0)
+    axes[2].set_xticks(x, list(effects), fontsize=8.5)
+    axes[2].set(ylabel="change in Matthews correlation", title="What each is worth, on shared genes",
+                ylim=(-0.02, 0.30))
+    axes[2].legend(fontsize=8, loc="upper right")
+
+    fig.suptitle("Holding the gene set fixed: the medium is worth more than model development, "
+                 "and development stopped paying in 2007", x=0.01, ha="left", y=1.04)
     save(fig, "medium.png")
 
 
@@ -196,10 +226,11 @@ def main():
     grades = pd.read_csv(RESULTS / "grades.csv")
     split = pd.read_csv(RESULTS / "split.csv")
     bootstrap = pd.read_csv(RESULTS / "bootstrap.csv")
+    common = pd.read_csv(RESULTS / "common_genes.csv")
     changed = pd.read_csv(RESULTS / "changed.csv")
 
     figure_disagreement(consensus, agreement)
-    figure_medium(grades)
+    figure_medium(grades, common)
     figure_grader(split)
     figure_transfer(bootstrap, changed)
 

@@ -27,6 +27,7 @@ import re
 import numpy as np
 import pandas as pd
 
+from .gpr import describe_change, essential_genes
 from .model import score
 
 B_NUMBER = re.compile(r"b\d{4}")
@@ -35,31 +36,49 @@ B_NUMBER = re.compile(r"b\d{4}")
 def corrections_diff(before, after) -> dict:
     """What one model actually changes relative to another, as reactions, gene rules and bounds.
 
-    A transfer result is only interpretable next to the content of the change, and a published model
-    diff is rarely reported. Gene rules are compared on their *gene set* rather than their text, because
-    most of the edits here only re-bracket an unchanged rule — counting those as changes would overstate
-    how much was altered by a factor of three.
+    A transfer result is only interpretable next to the content of the change, and a published model diff
+    is rarely reported.
+
+    Gene rules are compared by **Boolean equivalence**, not by which genes appear in them. The two are
+    not the same test and the difference is the whole point: `A and B` and `A or B` contain identical
+    gene sets and mean opposite things — a complex in which both genes are essential, against a pair of
+    isozymes in which neither is. A gene-set comparison calls that pair unchanged. Since a rule change is
+    only interesting here because of what it does to essentiality, every rule whose text differs is
+    classified by its effect on the set of genes the rule makes essential:
+
+      equivalent      the same Boolean function, written differently — bracketing, ordering
+      more essential  the rule now makes strictly more genes essential (an isozyme was dropped)
+      less essential  strictly fewer (an isozyme was added, or a complex relaxed)
+      both            some genes gained essentiality and others lost it
+      restructured    the function changed without changing which genes it makes essential
     """
     ra = {r.id: r for r in before.reactions}
     rb = {r.id: r for r in after.reactions}
     shared = set(ra) & set(rb)
 
-    rules, cosmetic = [], 0
+    rules, equivalent_count = [], 0
     for rid in sorted(shared):
         old, new = ra[rid].gene_reaction_rule, rb[rid].gene_reaction_rule
         if old == new:
             continue
-        genes_old, genes_new = set(B_NUMBER.findall(old)), set(B_NUMBER.findall(new))
-        if genes_old == genes_new:
-            cosmetic += 1
+        kind = describe_change(old, new)
+        if kind == "equivalent":
+            equivalent_count += 1
             continue
-        rules.append({"reaction": rid, "dropped": " ".join(sorted(genes_old - genes_new)),
-                      "added": " ".join(sorted(genes_new - genes_old)), "rule_after": new})
+        genes_old, genes_new = set(B_NUMBER.findall(old)), set(B_NUMBER.findall(new))
+        rules.append({
+            "reaction": rid, "change": kind,
+            "dropped": " ".join(sorted(genes_old - genes_new)),
+            "added": " ".join(sorted(genes_new - genes_old)),
+            "newly_essential": " ".join(sorted(essential_genes(new) - essential_genes(old))),
+            "no_longer_essential": " ".join(sorted(essential_genes(old) - essential_genes(new))),
+            "rule_before": old, "rule_after": new,
+        })
     return {
         "reactions_added": sorted(set(rb) - set(ra)),
         "reactions_removed": sorted(set(ra) - set(rb)),
         "gene_rules_changed": pd.DataFrame(rules),
-        "gene_rules_rebracketed": cosmetic,
+        "gene_rules_equivalent": equivalent_count,
         "bounds_changed": sum(ra[r].bounds != rb[r].bounds for r in shared),
     }
 

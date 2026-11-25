@@ -1,10 +1,10 @@
-reaction,dropped,added,rule_after
-ASPK,b3940 b4024,,b0002
-CYSS,b2421,,b2414
-CYSTL,b1622,,b3008
-HSDy,b3940,,b0002
-IPMD,b1800,,b0073
-METS,b4019,,b3829
-SHK3Dr,b1692,,b3281
-SHKK,b0388,,b3390
-THRD_L,b3117,,b3772
+reaction,change,dropped,added,newly_essential,no_longer_essential,rule_before,rule_after
+ASPK,more essential,b3940 b4024,,b0002,,b0002 or b3940 or b4024,b0002
+CYSS,more essential,b2421,,b2414,,b2421 or b2414,b2414
+CYSTL,more essential,b1622,,b3008,,b3008 or b1622,b3008
+HSDy,more essential,b3940,,b0002,,b3940 or b0002,b0002
+IPMD,more essential,b1800,,b0073,,b0073 or b1800,b0073
+METS,more essential,b4019,,b3829,,b4019 or b3829,b3829
+SHK3Dr,more essential,b1692,,b3281,,b3281 or b1692,b3281
+SHKK,more essential,b0388,,b3390,,b3390 or b0388,b3390
+THRD_L,more essential,b3117,,b3772,,b3772 or b3117,b3772

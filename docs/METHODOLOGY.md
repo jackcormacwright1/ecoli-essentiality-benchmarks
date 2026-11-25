@@ -50,6 +50,24 @@ for the corrected model those three open uptakes are part of the correction, not
 discarding them would be grading a model nobody published. `predict_essential()` raises rather than
 scoring a model that does not grow.
 
+### Comparing models without also changing the genes
+
+The four reconstructions contain 904, 1261, 1367 and 1516 genes. Scoring each over its own gene list
+means that a comparison between two generations also changes which genes are being graded, so an
+apparent improvement could be a change of subject rather than a change of quality. Every model is
+therefore scored twice: once on its own genes, and once restricted to the 877 genes all four contain.
+
+The two disagree, and the restricted version is the one that answers the question asked. On shared genes
+the gain from iJR904 to iML1515 is concentrated almost entirely in the first step; the decade after 2007
+contributes +0.008. The difference between the two rows also says something on its own — each
+generation's additional genes are predicted less well than the shared core.
+
+A second run puts every model on strictly identical uptakes (`set_medium(..., strict=True)`), discarding
+any uptake a model's author left open, so that a difference between models cannot be carried by the
+medium each one happens to ship. For the four published generations this changes nothing, because none
+of them ships extras; the only model that does is the corrected one, where those three uptakes are part
+of the correction. That is asserted by a test rather than assumed.
+
 ### The threshold
 
 Deleting a gene rarely takes growth to exactly zero; it takes it to some fraction of wild type. Where the
@@ -129,10 +147,25 @@ sets, three experiments that agree about most genes. The defensible claim is a c
 a demonstrated large one.
 
 **The diff.** What the corrections actually consist of, computed from the two model files rather than
-described from the paper: two added intracellular exchange reactions, nine gene rules whose gene set
-changed, 28 more that only re-bracket an unchanged rule, and 35 changed bounds. Gene rules are compared
-on their gene set rather than their text precisely because of those 28 — comparing text would report 37
-changes and overstate the size of the correction threefold.
+described from the paper: two added intracellular exchange reactions, 37 rewritten gene rules of which 28
+are logically equivalent to what they replaced and 9 are not, and 35 changed bounds.
+
+Comparing gene rules needs the right test, and the obvious one is wrong. Asking whether the same genes
+appear in a rule cannot distinguish `A and B` from `A or B` — identical gene sets, opposite meanings: a
+complex in which both genes are essential, against isozymes in which neither is. Since a rule change
+matters here only through its effect on essentiality, that is precisely the distinction that must survive
+the comparison.
+
+A GPR rule uses only `and` and `or`, never `not`, so it is a *monotone* Boolean function, and monotone
+functions have an exact canonical form: the set of minimal gene sets sufficient to enable the reaction.
+`src/eeb/gpr.py` parses each rule into disjunctive normal form and applies absorption — dropping any term
+that a smaller term already covers — which yields that canonical form. Two rules mean the same thing if
+and only if their canonical forms are equal. One real example needs the absorption step: `PFL` is written
+as `(b0902 and b0903) or … or ((b0902 and b0903) and b2579)`, whose last term is redundant.
+
+The same machinery gives the quantity that connects a rule to a prediction: a gene is essential to a rule
+when it appears in **every** minimal sufficient set. Each of the nine real changes drops an isozyme and
+makes exactly one gene newly essential.
 
 ## What this cannot tell you
 
@@ -141,8 +174,9 @@ measurement of how much the grade depends on the grader, not as a problem to be 
 
 **Whether the corrections are good corrections.** They were made for a different prediction task —
 fitness across carbon sources — and this repository tests transfer to essentiality, which is not what
-they were built for and not what they claimed. A negative transfer result is evidence that corrections
-are task-specific, not evidence that the corrected model is worse at its own job. The README's
+they were built for and not what they claimed. The precise result is that they reduced MCC on the three
+essentiality benchmarks tested, under both media. That is evidence corrections are task-specific; it is
+not evidence that the corrected model is worse at its own job, which is untested here. The README's
 explanation of *why* they fail to transfer, via carry-over exchanges and isozyme removal, is read off the
 model diff and is consistent with that reading.
 

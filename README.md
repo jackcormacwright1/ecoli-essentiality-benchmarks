@@ -21,13 +21,36 @@ are contested. Pairwise agreement looks reassuring at 96–99%, but that number 
 19 genes in 20 that everyone agrees are dispensable; every disagreement is about an essential gene, which
 is the only class anybody cares about.
 
-**2. The medium matters as much as fifteen years of model development.** iML1515 scores MCC 0.537
-against the Keio collection on its own default M9 glucose, and 0.728 on a rich medium closer to the one
-the Keio collection was actually built in. That 0.19 gap is slightly larger than the 0.15 gained by going
-from iJR904 (2003) to iML1515 (2017). A quoted accuracy figure without a stated medium is not a
-measurement of the model.
+**2. The medium is worth more than model development — and development stopped paying in 2007.** iML1515
+scores MCC 0.537 against the Keio collection on its own default M9 glucose, and 0.728 on a rich medium
+closer to the one the Keio collection was actually built in. A quoted accuracy figure without a stated
+medium is not a measurement of the model.
+
+Comparing *models* needs more care, because the four reconstructions do not contain the same genes —
+904, 1261, 1367 and 1516 of them. Grading each on its own gene list makes a comparison between
+generations partly a comparison of gene lists, so all four are also graded on the **877 genes they
+share**. That changes the shape of the result:
+
+| Keio, rich medium | iJR904 (2003) | iAF1260 (2007) | iJO1366 (2011) | iML1515 (2017) |
+|---|---|---|---|---|
+| each on its own genes | 0.564 | 0.629 | 0.606 | **0.728** |
+| all four on shared genes | 0.567 | **0.718** | 0.715 | 0.726 |
+
+On the shared genes almost the entire gain is one step, from iJR904 to iAF1260 (+0.151). The decade from
+2007 to 2017 is worth +0.008. Against that, getting the medium right is worth +0.228 — and the pattern
+holds for all three experiments (medium +0.19 to +0.23; all development +0.10 to +0.16; development since
+2007 +0.00 to +0.01).
+
+The gap between the two rows is a finding in itself: each generation's *additional* genes are predicted
+worse than the shared core, which is what drags iAF1260's own-gene score down from 0.718 to 0.629. Only
+iML1515 scores about the same either way.
 
 ![Medium against model generation](results/medium.png)
+
+A separate run puts every model on strictly identical uptakes, dropping any its author left open, to
+check that this comparison is not being carried by the medium each model happens to ship. For these four
+it makes no difference at all — only the corrected model ships extras — and a test pins that rather than
+assuming it.
 
 **3. The model's apparent accuracy is partly a property of whoever is grading it.** On the genes the
 experiments agree about, iML1515 scores MCC 0.766–0.768 — effectively identical whichever experiment you
@@ -42,10 +65,10 @@ disagree about.
 
 ![The grade depends on the grader](results/grader.png)
 
-**4. A published set of corrections does not transfer.** The corrections in `iML1515_corrected` were
-derived against RB-TnSeq carbon-source fitness data. None of the three essentiality experiments here was
-used to make them, so grading the corrected model against them is an out-of-sample test by construction.
-It comes out negative in all six medium × experiment combinations:
+**4. A published set of corrections reduced MCC on every essentiality benchmark tested here.** The
+corrections in `iML1515_corrected` were derived against RB-TnSeq carbon-source fitness data. None of the
+three essentiality experiments here was used to make them, so grading the corrected model against them is
+an out-of-sample test by construction. It comes out negative in all six medium × experiment combinations:
 
 | Medium | Experiment | MCC before | MCC after | Δ MCC | 90% interval |
 |---|---|---|---|---|---|
@@ -63,11 +86,23 @@ not vary independently either. The honest summary is a consistent small loss, no
 
 ![The corrections do not transfer](results/transfer.png)
 
+This is a result about these benchmarks, not a general verdict on the corrected model: it was built for a
+different prediction task, and nothing here tests it at that task. What the result does show is that a
+correction validated on one dataset should not be assumed to carry to another.
+
 ### Why it fails, and why that was predictable
 
 Only thirteen gene calls change, and they are not scattered. The corrections are small and readable —
-two added reactions, nine substantive gene-rule changes (plus 28 cosmetic re-bracketings and 35 bound
-changes) — and between them they account for all thirteen, in two opposite directions.
+two added reactions, 37 rewritten gene rules of which **28 are logically equivalent** to what they
+replaced and 9 are not, and 35 changed bounds — and between them the nine real ones account for all
+thirteen, in two opposite directions.
+
+Rules are compared by Boolean equivalence rather than by which genes appear in them, because the two are
+different tests and the difference is the whole point. `A and B` and `A or B` contain identical gene sets
+and mean opposite things: a complex in which both genes are essential, against isozymes in which neither
+is. `src/eeb/gpr.py` parses each rule to its canonical form — the minimal sets of genes sufficient to
+enable the reaction — so "equivalent" means equivalent, and every real change is classified by what it
+does to the set of genes the rule makes essential.
 
 **Two added exchange reactions make nine genes dispensable.** `EX_nad_c` and `EX_thf_c` are *intracellular*
 exchanges: they let the model draw NAD and tetrahydrofolate from nowhere. That turns off the need for
@@ -127,11 +162,12 @@ the classical genetic literature's call, is loaded for the same reason and used 
 |---|---|
 | `src/eeb/essentiality.py` | the five published opinions, mapped onto one b-number index, with NA kept as a third state |
 | `src/eeb/model.py` | medium specification, single-gene deletion scans, the confusion matrix |
-| `src/eeb/transfer.py` | does a correction transfer? gene-level changes, bootstrap, and the error-count reconciliation |
+| `src/eeb/gpr.py` | gene rules compared by Boolean equivalence, and which genes a rule makes essential |
+| `src/eeb/transfer.py` | does a correction transfer? the model diff, gene-level changes, bootstrap, and the error-count reconciliation |
 | `scripts/01_fetch.py` | checks every input is present and says where each one comes from |
 | `scripts/02_grade.py` | every number quoted above |
 | `scripts/03_figures.py` | every chart |
-| `tests/test_core.py` | 20 tests, including the four findings as regression tests |
+| `tests/test_core.py` | 36 tests, including the four findings as regression tests |
 | `docs/METHODOLOGY.md` | the choices, the arithmetic, and what this design cannot tell you |
 
 ## Running it

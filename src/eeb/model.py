@@ -66,15 +66,22 @@ M9_GLUCOSE = {
 }
 
 
-def set_medium(model, rich: bool, uptake: float = 10.0) -> dict:
-    """Put the model on M9 glucose, keeping any extra uptake its author left open, and optionally
-    supplement it to something like a rich broth.
+def set_medium(model, rich: bool, uptake: float = 10.0, strict: bool = False) -> dict:
+    """Put the model on M9 glucose, optionally supplemented to something like a rich broth.
+
+    `strict` decides what happens to uptakes a model's author left open that are not part of M9. With
+    `strict=False` they are kept, because for the corrected model those three uptakes (biotin,
+    pantothenate, thiamine) are part of the published correction rather than an oversight, and grading
+    the model without them would be grading something nobody published. With `strict=True` every model
+    gets exactly the same uptake set and nothing else, which is what is needed to say how much of a
+    difference between two models comes from the models and how much from their shipped medium. Both
+    are run, because neither answers the other's question.
 
     Returns the uptakes actually applied, since not every model generation has an exchange reaction for
     every component.
     """
-    authors_extras = {r.id: r.lower_bound for r in model.exchanges
-                      if r.lower_bound < 0 and r.id not in M9_GLUCOSE}
+    authors_extras = {} if strict else {r.id: r.lower_bound for r in model.exchanges
+                                        if r.lower_bound < 0 and r.id not in M9_GLUCOSE}
     for exchange in model.exchanges:
         exchange.lower_bound = 0.0
     applied = {}
