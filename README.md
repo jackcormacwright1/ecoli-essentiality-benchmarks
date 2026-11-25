@@ -131,7 +131,7 @@ the classical genetic literature's call, is loaded for the same reason and used 
 | `scripts/01_fetch.py` | checks every input is present and says where each one comes from |
 | `scripts/02_grade.py` | every number quoted above |
 | `scripts/03_figures.py` | every chart |
-| `tests/test_core.py` | 18 tests, including the four findings as regression tests |
+| `tests/test_core.py` | 20 tests, including the four findings as regression tests |
 | `docs/METHODOLOGY.md` | the choices, the arithmetic, and what this design cannot tell you |
 
 ## Running it
